@@ -1,0 +1,5 @@
+"""SpiderPhish - package root."""
+__version__ = "1.1.0"
+APP_NAME = "SpiderPhish"
+APP_TAGLINE = "DEFEND TODAY, HACK TOMORROW"
+APP_SUBTITLE = "ANTI-PHISHING ANALYZER"

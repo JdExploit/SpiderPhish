@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist*/
+*.spec.bak
+SpiderPhish.py
+
+# Secrets - NEVER commit
+.env
+config/secure.json
+config/.spiderphish.key
+config/.jdexploit.key
+config/app.json
+
+# Runtime data
+data/
+reports/
+cases/
