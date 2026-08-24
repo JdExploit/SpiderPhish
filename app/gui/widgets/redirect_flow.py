@@ -12,9 +12,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QScrollArea,
                                QSizePolicy, QVBoxLayout, QWidget)
 
-from app.gui.theme import BLUE, BORDER, GREEN, ORANGE, PANEL2, RED, TEXT, \
-    TEXT_DIM, YELLOW
-from app.utils.ioc_extraction import registered_domain
+from app.gui.theme import BLUE, BORDER, GREEN, ORANGE, PANEL2, PURPLE, RED, \
+    TEXT, TEXT_DIM, YELLOW
+from app.utils.ioc_extraction import domain_of, registered_domain
 
 
 def _status_color(code) -> str:
@@ -38,8 +38,12 @@ class HopCard(QFrame):
     def __init__(self, hop: dict, prev_domain: str | None):
         super().__init__()
         code = hop.get("status_code")
-        color = _status_color(code)
-        is_meta = code is None
+        custom_tag = hop.get("_pill")
+        if custom_tag:
+            color = hop.get("_pill_color") or PURPLE
+        else:
+            color = _status_color(code)
+        is_meta = code is None and not custom_tag
 
         self.setStyleSheet(
             f"QFrame {{ background-color: {PANEL2}; border: 1px solid {BORDER};"
@@ -57,7 +61,9 @@ class HopCard(QFrame):
             f"color:{TEXT_DIM}; font-size:7.5pt; font-weight:700;"
             "letter-spacing:1px; border:none;")
 
-        pill_txt = ("META-REFRESH" if is_meta
+        pill_txt = (str(custom_tag) if custom_tag
+                    else "JS-REDIRECT" if "js-location" in str(hop.get("reason", ""))
+                    else "META-REFRESH" if is_meta
                     else f"HTTP {code}" if code else "HTTP ?")
         pill = QLabel(pill_txt)
         pill.setStyleSheet(
@@ -131,6 +137,7 @@ class RedirectFlowView(QWidget):
         self._lay.setAlignment(Qt.AlignTop)
         self._scroll.setWidget(self._container)
         outer.addWidget(self._scroll)
+        self._us_widgets: list[QWidget] = []
 
         note = QLabel("HTTP-level trace: no browser, no scripts executed. "
                       "Note: requests originate from this machine's IP "
@@ -141,24 +148,78 @@ class RedirectFlowView(QWidget):
         outer.addWidget(note)
 
     def set_hops(self, hops: list[dict]) -> None:
-        while self._lay.count():
-            item = self._lay.takeAt(0)
-            if w := item.widget():
-                w.deleteLater()
+        self._clear()
         prev = None
         for h in hops:
-            arrow = QLabel("| v")
-            arrow.setAlignment(Qt.AlignHCenter)
-            arrow.setStyleSheet(
-                f"color:{TEXT_DIM}; font-size:9pt; border:none; padding:0;")
             card = HopCard(h, prev)
             self._lay.addWidget(card)
-            self._lay.addWidget(arrow)
+            self._lay.addWidget(self._arrow())
             prev = card.reg_domain or prev
         if not hops:
             empty = QLabel("(sin redirecciones registradas)")
             empty.setStyleSheet(f"color:{TEXT_DIM}; border:none;")
             self._lay.addWidget(empty)
+
+    def set_urlscan_redirects(self, chains: list[dict]) -> None:
+        """Render browser-grade page history from a urlscan.io result.
+
+        Entries look like {from, to, status?, initiator?}; initiator
+        'script' means a JS/client-side jump urlscan's browser executed.
+        """
+        for w in (self._us_widgets or []):
+            self._lay.removeWidget(w)
+            w.deleteLater()
+        self._us_widgets = []
+        chains = [c for c in chains or []
+                  if isinstance(c, dict) and c.get("from")]
+        if not chains:
+            return
+        header = QLabel("URLSCAN.IO - PAGE URL HISTORY (real-browser grade)")
+        header.setStyleSheet(
+            f"color:{PURPLE}; font-size:8pt; font-weight:800;"
+            "letter-spacing:1px; padding:6px 2px 2px 2px; border:none;")
+        self._lay.addWidget(header)
+        self._us_widgets.append(header)
+        prev = None
+        step = 0
+        entries = []
+        for ch in chains:
+            entries.append((ch.get("from"), ch))
+        last_to = chains[-1].get("to")
+        if last_to:
+            entries.append((last_to, {"status_code": 200, "_pill": "LANDING"}))
+        for url, meta in entries:
+            step += 1
+            hop = {"step": step, "url": url,
+                   "status_code": meta.get("status_code"),
+                   "domain": domain_of(url),
+                   "protocol": url.split("://")[0] if "://" in url else ""}
+            if not hop["status_code"] and meta.get("initiator") == "script":
+                hop["_pill"] = "JS-REDIRECT"
+                hop["_pill_color"] = PURPLE
+            elif meta.get("_pill"):
+                hop["_pill"] = meta["_pill"]
+                hop["_pill_color"] = GREEN
+            card = HopCard(hop, prev)
+            self._lay.addWidget(card)
+            self._lay.addWidget(self._arrow())
+            self._us_widgets.append(card)
+            prev = card.reg_domain or prev
+
+    # ------------------------------------------------------------------
+    def _clear(self) -> None:
+        while self._lay.count():
+            item = self._lay.takeAt(0)
+            if w := item.widget():
+                w.deleteLater()
+        self._us_widgets = []
+
+    def _arrow(self) -> QLabel:
+        arrow = QLabel("\u25BC")
+        arrow.setAlignment(Qt.AlignHCenter)
+        arrow.setStyleSheet(
+            f"color:{TEXT_DIM}; font-size:7pt; border:none; padding:0;")
+        return arrow
 
     def sizeHint(self):  # sensible default inside splitters
         s = super().sizeHint()

@@ -6,6 +6,7 @@ WhereGoes-style endpoint can be configured, but local analysis is default.
 """
 from __future__ import annotations
 
+import re
 from urllib.parse import urljoin
 
 import httpx
@@ -77,18 +78,32 @@ class WhereGoesAdapter:
                     body_ct = r.headers.get("content-type", "")
                     if "text/html" in body_ct and meta_refresh_seen < META_REFRESH_LIMIT:
                         mr = _parse_meta_refresh(r.text or "")
-                        if mr:
+                        js_target = None if mr else _parse_js_redirect(r.text or "")
+                        if mr or js_target:
                             meta_refresh_seen += 1
-                            nxt = urljoin(str(r.url), mr[1])
+                            nxt = urljoin(str(r.url), mr[1] if mr else js_target)
                             if check_ssrf:
                                 nxt = validate_url(nxt, allow_internal)
                             hops.append(RedirectHop(
                                 step=len(hops) + 1, url=nxt, status_code=None,
-                                reason=f"meta-refresh ({mr[0]}s)",
+                                reason=(f"meta-refresh ({mr[0]}s)" if mr
+                                        else "js-location (static)"),
                                 domain=domain_of(nxt),
                                 protocol=nxt.split("://")[0]))
                             current = nxt
                             continue
+                    elif "text/html" in body_ct:
+                        # even without following, flag a JS cloak attempt
+                        js_target = _parse_js_redirect(r.text or "")
+                        if js_target and meta_refresh_seen < META_REFRESH_LIMIT:
+                            meta_refresh_seen += 1
+                            hops.append(RedirectHop(
+                                step=len(hops) + 1,
+                                url=urljoin(str(r.url), js_target),
+                                status_code=None,
+                                reason="js-location (static, not followed)",
+                                domain=domain_of(js_target),
+                                protocol=js_target.split("://")[0]))
                 break
             except httpx.HTTPError as e:
                 log.warning("[WARN] redirect fetch failed at %s: %s", current, e)
@@ -105,10 +120,26 @@ class WhereGoesAdapter:
 
 
 def _parse_meta_refresh(html: str):
-    import re
     m = re.search(
         r"<meta[^>]+http-equiv=[\"']?refresh[\"']?[^>]+content=[\"'](\d+)\s*;\s*url=([^\"']+)",
         html, re.IGNORECASE)
     if m:
         return int(m.group(1)), m.group(2).strip()
+    return None
+
+
+_JS_LOCATION_RE = re.compile(
+    r"(?:window\.|top\.|self\.)?location(?:\.href)?\s*=\s*[\"']([^\"']{4,})[\"']"
+    r"|window\.location\.replace\(\s*[\"']([^\"']{4,})[\"']"
+    r"|window\.location\.assign\(\s*[\"']([^\"']{4,})[\"']", re.IGNORECASE)
+
+
+def _parse_js_redirect(html: str) -> str | None:
+    """Statically spot JS location redirects (no script execution)."""
+    if not html:
+        return None
+    for m in _JS_LOCATION_RE.finditer(html):
+        target = next((g for g in m.groups() if g), None)
+        if target and not target.lower().startswith("javascript:"):
+            return target.strip()
     return None

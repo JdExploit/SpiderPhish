@@ -205,4 +205,6 @@ class UrlAnalyzerPage(_IntelBase):
             else:
                 self.scan_card.set_rows([("URLScan.io",
                                           scan.get("error") or f"error ({st})")])
+        if scan_ok and str(st).upper() == "INFO":
+            self.flow_view.set_urlscan_redirects(scan.get("redirects") or [])
         log.info("URL analysis finished: %s (%d/100)", self.url_input.text(), score)

@@ -198,6 +198,14 @@ class UrlScanProvider(URLReputationProvider):
             "country": page.get("country", ""),
             "server": page.get("server", ""),
             "final_url": page.get("url", ""),
+            # browser-grade redirect history incl. JS/client-side jumps
+            "redirects": [
+                {"from": rd.get("from", ""),
+                 "to": rd.get("to", ""),
+                 "status_code": rd.get("status"),
+                 "initiator": rd.get("initiator", "")}
+                for rd in (d.get("data", {}) or {}).get("redirects", []) or []
+            ],
             "domains": _names(lists.get("domains"), "domain"),
             "ips": _names(lists.get("ips"), "ip"),
             "technologies": _names(lists.get("technologies"), "technology"),
