@@ -58,6 +58,7 @@ class IOCLookupPage(_IntelBase):
         root.addWidget(self.results)
         root.addStretch()
         self.btn.clicked.connect(self.lookup)
+        self.input.returnPressed.connect(self.lookup)
 
     def lookup(self):
         value = self.input.text().strip()

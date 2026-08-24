@@ -89,6 +89,7 @@ class UrlAnalyzerPage(_IntelBase):
         root.addWidget(split, 1)
 
         self.btn.clicked.connect(self.analyze)
+        self.url_input.returnPressed.connect(self.analyze)
 
     # ------------------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:

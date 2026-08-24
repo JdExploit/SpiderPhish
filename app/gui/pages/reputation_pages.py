@@ -1,6 +1,8 @@
 """Reputation pages: IP, Domain, Hash lookup and Threat Feeds overview."""
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
@@ -34,10 +36,19 @@ class IPReputationPage(_IntelBase):
         self.card = KVCard("RESULT", [])
         root.addWidget(self.card); root.addStretch()
         btn.clicked.connect(self.check)
+        self.input.returnPressed.connect(self.check)
 
     def check(self):
+        import ipaddress
         ip = self.input.text().strip()
         if not ip:
+            return
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            self.card.set_rows([("Error",
+                                 f"'{ip}' no es una IPv4/IPv6 valida "
+                                 f"(ejemplo: 8.8.8.8)")])
             return
         reg = self.app_ctx.registry
         timeout = self.app_ctx.settings.analysis.timeout_seconds
@@ -93,10 +104,17 @@ class DomainReputationPage(_IntelBase):
         self.card = KVCard("DOMAIN INFO", [])
         root.addWidget(self.card); root.addStretch()
         btn.clicked.connect(self.check)
+        self.input.returnPressed.connect(self.check)
 
     def check(self):
-        domain = self.input.text().strip().lower().replace("http://", "").replace("https://", "")
-        if not domain or "/" in domain:
+        from urllib.parse import urlparse
+        raw = self.input.text().strip().lower()
+        domain = re.sub(r"^[a-z][a-z0-9+.-]*://", "", raw)
+        domain = urlparse(f"https://{domain}").hostname or ""
+        if not domain or "." not in domain:
+            self.card.set_rows([("Error",
+                                 f"'{raw}' no parece un dominio valido "
+                                 f"(ejemplo: suspicious-domain.com)")])
             return
         reg = self.app_ctx.registry
         timeout = self.app_ctx.settings.analysis.timeout_seconds
@@ -147,6 +165,7 @@ class HashLookupPage(_IntelBase):
         self.card = KVCard("RESULT", [])
         root.addWidget(self.card); root.addStretch()
         btn.clicked.connect(self.check)
+        self.input.returnPressed.connect(self.check)
 
     def check(self):
         h = self.input.text().strip()

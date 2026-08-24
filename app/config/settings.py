@@ -145,9 +145,9 @@ class SecureStore:
         if changed:
             self.save()
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str, default: str | None = None) -> Optional[str]:
         v = self._data.get(name)
-        return v if v else None
+        return v if v else default
 
     def set(self, name: str, value: str) -> None:
         value = value.strip()
