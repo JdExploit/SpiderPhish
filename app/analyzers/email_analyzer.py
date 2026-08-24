@@ -7,6 +7,7 @@ analysis continues (spec section 31).
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
@@ -308,9 +309,16 @@ class EmailAnalyzer:
         ui.risk_level = (_score_to_status(ui.risk_score))
         return ui
 
+    # static assets urlscan.io refuses to scan (and nobody needs scanned)
+    _STATIC_ASSET_RE = re.compile(
+        r"\.(png|jpe?g|gif|webp|bmp|svg|ico|css|mjs?)([?#]|$)", re.IGNORECASE)
+
     def _should_urlscan(self, u: UrlInfo) -> bool:
-        return (self.reg.urlscan.is_configured()
-                and (u.risk_score >= 30 or u.redirect_count >= 2))
+        if not self.reg.urlscan.is_configured():
+            return False
+        if self._STATIC_ASSET_RE.search(u.url):
+            return False
+        return u.risk_score >= 30 or u.redirect_count >= 2
 
     async def _urlscan_lookup(self, url: str, client: httpx.AsyncClient) -> dict:
         return await self.reg.urlscan.lookup_url(url, client)

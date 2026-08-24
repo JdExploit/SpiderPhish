@@ -54,12 +54,26 @@ class UrlScanProvider(URLReputationProvider):
             r = await client.post(SUBMIT_URL, headers=_headers(key),
                                   json={"url": url, "visibility": "private"})
             data = r.json()
-            if r.status_code not in (200, 400):  # 400 may be 'already submitted'
+            if r.status_code == 400:
+                # per docs: rejection reasons include blacklisted/spammy
+                # URLs, non-resolvable hostnames... unless it is an
+                # 'already submitted' response carrying a result link
+                uuid = ""
+                if isinstance(data.get("result"), str) and data["result"]:
+                    uuid = data["result"].rstrip("/").rsplit("/", 1)[-1]
+                if uuid:
+                    return {"status": Status.INFO, "uuid": uuid}
+                msg = data.get("message") or data.get("description") or ""
+                return {"status": Status.ERROR,
+                        "error": (f"URLScan rechazo el envio (HTTP 400): "
+                                  f"{str(msg)[:160] or 'sin detalle'}")}
+            if r.status_code != 200:
                 return {"status": Status.ERROR,
                         "error": f"HTTP {r.status_code}: {str(data)[:200]}"}
             uuid = data.get("uuid", "")
-            if r.status_code == 400 and "result" in data:
-                uuid = data["result"].rsplit("/", 1)[-1]
+            if not uuid:
+                return {"status": Status.ERROR,
+                        "error": "URLScan no devolvio UUID de escaneo"}
             return {"status": Status.INFO, "uuid": uuid}
         except httpx.HTTPError as e:
             return {"status": Status.ERROR, "error": f"URLScan unavailable: {e}"}
@@ -74,6 +88,9 @@ class UrlScanProvider(URLReputationProvider):
         intervals until finished; 404 while in progress is EXPECTED.
         """
         loop = asyncio.get_event_loop()
+        if not uuid:
+            return {"status": Status.ERROR,
+                    "error": "URLScan: no scan UUID to poll (submission failed)"}
         deadline = loop.time() + timeout
         # initial quiet period so the scan has time to process
         quiet = (min(10.0, max(0.0, timeout * 0.25))
