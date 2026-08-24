@@ -87,17 +87,21 @@ class KVCard(Card):
         self.grid = kv_rows(rows)
         self.add_layout(self.grid)
 
-    def set_rows(self, rows: list[tuple[str, str]]) -> None:
+    def set_rows(self, rows: list[tuple]) -> None:
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for i, (k, v) in enumerate(rows):
+        for i, row in enumerate(rows):
+            k, v = row[0], row[1]
+            color = row[2] if len(row) > 2 else None
             kl = QLabel(k)
             kl.setStyleSheet(f"color:{TEXT_DIM}; font-size:8.5pt; font-weight:700;")
             vl = QLabel(v or "-")
             vl.setTextInteractionFlags(Qt.TextSelectableByMouse)
             vl.setWordWrap(True)
+            if color:
+                vl.setStyleSheet(f"color:{color}; font-weight:700;")
             self.grid.addWidget(kl, i, 0, Qt.AlignTop)
             self.grid.addWidget(vl, i, 1)
 

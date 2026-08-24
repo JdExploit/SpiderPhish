@@ -125,10 +125,12 @@ class IOCLookupPage(_IntelBase):
             log.info("  %s: %s", k, str(v).replace("\n", " ")[:90])
 
 
-def _fmt(name: str, result: dict, detail_fn=None) -> tuple[str, str]:
+def _fmt(name: str, result: dict, detail_fn=None) -> tuple:
     status = getattr(result.get("status"), "value", "?")
     if status == "INFO":
-        detail = detail_fn(result) if detail_fn else \
-            f"malicious votes: {result.get('malicious_votes', '?')}"
-        return (name, detail)
+        if detail_fn:
+            return (name, detail_fn(result))
+        from app.gui.pages.reputation_pages import vt_summary
+        txt, col = vt_summary(result)
+        return (name, txt, col)
     return (name, result.get("error") or status)

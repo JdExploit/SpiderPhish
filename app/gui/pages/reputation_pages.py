@@ -9,12 +9,31 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QVBoxLayout,
                                QWidget)
 
 from app.core.logging_setup import get_logger
-from app.gui.theme import TEXT_DIM
+from app.gui.theme import GREEN, RED, TEXT_DIM, YELLOW
 from app.gui.widgets.common import Card, KVCard, add_table_row, make_table
 from app.gui.pages.url_analyzer_page import _IntelBase
 from app.gui.pages.ioc_lookup_page import classify
 
 log = get_logger("gui.reputation")
+
+
+def vt_summary(vt: dict) -> tuple[str, str]:
+    """VirusTotal-style detection ratio: '2/94 engines flagged · MALICIOUS'."""
+    m = int(vt.get("malicious_votes") or 0)
+    s = int(vt.get("suspicious_votes") or 0)
+    h = int(vt.get("harmless_votes") or 0)
+    u = vt.get("undetected_votes")
+    total = m + s + h + (int(u) if u is not None else 0)
+    if total <= 0:
+        return "sin datos de motores", TEXT_DIM
+    pct_clean = 100 * (total - m - s) // total
+    if m >= 2:
+        verdict, color = "MALICIOUS", RED
+    elif m >= 1 or s >= 2:
+        verdict, color = "SUSPICIOUS", YELLOW
+    else:
+        verdict, color = "CLEAN", GREEN
+    return f"{m}/{total} engines flagged · {verdict} · {pct_clean}% clean", color
 
 
 class IPReputationPage(_IntelBase):
@@ -71,9 +90,10 @@ class IPReputationPage(_IntelBase):
                 vt = await reg.virustotal.lookup_ip(ip, client)
                 st = getattr(vt.get("status"), "value", "?")
                 if st == "INFO":
-                    rows.append(("VirusTotal",
-                                 f"malicious votes: {vt.get('malicious_votes')} · "
-                                 f"rep: {vt.get('reputation')}"))
+                    txt, col = vt_summary(vt)
+                    rep = vt.get("reputation")
+                    extra = f" · VT rep {rep}" if rep is not None else ""
+                    rows.append(("VirusTotal", txt + extra, col))
                 else:
                     rows.append(("VirusTotal", vt.get("error") or st))
             return rows
@@ -138,9 +158,11 @@ class DomainReputationPage(_IntelBase):
                 vt = await reg.virustotal.lookup_domain(domain, client)
                 otx = await reg.otx.lookup_domain(domain, client)
             st = getattr(vt.get("status"), "value", "?")
-            rows.append(("VirusTotal",
-                         f"malicious votes: {vt.get('malicious_votes')}" if st == "INFO"
-                         else vt.get("error") or st))
+            if st == "INFO":
+                txt, col = vt_summary(vt)
+                rows.append(("VirusTotal", txt, col))
+            else:
+                rows.append(("VirusTotal", vt.get("error") or st))
             st_o = getattr(otx.get("status"), "value", "?")
             rows.append(("OTX",
                          f"{otx.get('pulse_count', 0)} pulses" if st_o == "INFO"
@@ -194,7 +216,9 @@ class HashLookupPage(_IntelBase):
                 return [("VirusTotal", vt.get("error") or st)]
             if not vt.get("found"):
                 return [("VirusTotal", "Unknown hash - no existe en el dataset de VT")]
-            return [("Detection ratio",
+            txt, col = vt_summary(vt)
+            return [("VirusTotal", txt, col),
+                    ("Detection ratio",
                      f"{vt.get('malicious_votes')} engines flagged malicious"),
                     ("Top signatures", ", ".join(vt.get("signatures", [])[:8]) or "-"),
                     ("Names", ", ".join(vt.get("names", [])) or "-"),
