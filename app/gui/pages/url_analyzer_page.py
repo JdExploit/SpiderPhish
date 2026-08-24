@@ -88,6 +88,10 @@ class UrlAnalyzerPage(_IntelBase):
         self.btn.clicked.connect(self.analyze)
 
     # ------------------------------------------------------------------
+    def _set_busy(self, busy: bool) -> None:
+        self.btn.setEnabled(not busy)
+        self.btn.setText("ANALYZING…" if busy else "ANALYZE URL")
+
     def analyze(self):
         url = self.url_input.text().strip()
         if not url:
@@ -113,7 +117,7 @@ class UrlAnalyzerPage(_IntelBase):
                                    "error": f"{type(e).__name__}: {e}",
                                    "hops": [], "final": u}
             try:
-                async with httpx.AsyncClient(timeout=settings_a.timeout_seconds,
+                async with httpx.AsyncClient(timeout=max(settings_a.timeout_seconds, 30),
                                              verify=settings_a.verify_tls) as client:
                     prov = self.app_ctx.registry.urlscan
                     out["urlscan"] = await prov.lookup_url(u, client) \
@@ -123,9 +127,18 @@ class UrlAnalyzerPage(_IntelBase):
             return out
 
         log.info("Analyzing URL: %s", url)
+        self._set_busy(True)
+        self.info_card.set_rows([("Status", "Tracing redirects + querying URLScan.io…")])
+        self.scan_card.set_rows([("URLScan.io",
+                                  "Esperando resultado (puede tardar ~1-2 min)…")])
         self.run_async(job, url)
 
+    def on_failed(self, err: str):
+        self._set_busy(False)
+        QMessageBox.critical(self, "Error", err)
+
     def on_result(self, res):  # noqa: ANN001
+        self._set_busy(False)
         score, flags = res.get("score", 0), res.get("flags", [])
         level = ("MALICIOUS" if score >= 80 else "HIGH" if score >= 60 else
                  "SUSPICIOUS" if score >= 40 else "LOW" if score >= 15 else "SAFE")
@@ -157,17 +170,24 @@ class UrlAnalyzerPage(_IntelBase):
         if scan is None:
             self.scan_card.set_rows([("URLScan.io",
                                       "NOT CONFIGURED — requiere API key (Settings → API Configuration)")])
-        elif scan.get("status").value == "INFO":
-            self.scan_card.set_rows([
-                ("Verdict", "MALICIOUS" if scan.get("malicious")
-                 else "SUSPICIOUS" if scan.get("suspicious") else "CLEAN"),
-                ("Score", str(scan.get("score"))),
-                ("IP / ASN", f"{scan.get('ip') or '-'} · {scan.get('asn') or '-'}"),
-                ("Country", scan.get("country") or "-"),
-                ("Server", scan.get("server") or "-"),
-                ("HTTP requests", str(scan.get("http_requests", 0))),
-                ("Screenshot", scan.get("screenshot_url", "")),
-            ])
         else:
-            self.scan_card.set_rows([("URLScan.io", scan.get("error") or "error")])
+            st = getattr(scan.get("status"), "value", scan.get("status"))
+            if str(st).upper() == "INFO":
+                rows = [
+                    ("Verdict", "MALICIOUS" if scan.get("malicious")
+                     else "SUSPICIOUS" if scan.get("suspicious") else "CLEAN"),
+                    ("Score", str(scan.get("score"))),
+                    ("IP / ASN", f"{scan.get('ip') or '-'} · {scan.get('asn') or '-'}"),
+                    ("Country", scan.get("country") or "-"),
+                    ("Server", scan.get("server") or "-"),
+                    ("HTTP requests", str(scan.get("http_requests", 0))),
+                    ("Screenshot", scan.get("screenshot_url", "")),
+                ]
+                if scan.get("uuid"):
+                    rows.append(("Scan report",
+                                 f"https://urlscan.io/result/{scan['uuid']}/"))
+                self.scan_card.set_rows(rows)
+            else:
+                self.scan_card.set_rows([("URLScan.io",
+                                          scan.get("error") or f"error ({st})")])
         log.info("URL analysis finished: %s (%d/100)", self.url_input.text(), score)

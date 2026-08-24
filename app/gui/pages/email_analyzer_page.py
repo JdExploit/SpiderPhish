@@ -232,7 +232,7 @@ class EmailAnalyzerPage(QWidget):
         self.tab_ioc_table = make_table(["Type", "Value", "Severity"], stretch_cols=[1])
         self.tab_url_table = make_table(
             ["URL", "Domain", "Redirects", "Final destination", "Score",
-             "Risk"], stretch_cols=[0, 3])
+             "Risk", "URLScan.io"], stretch_cols=[0, 3])
 
         self.tabs.addTab(self._wrap_copy(self.txt_headers, "Headers"), "Headers")
         self.tabs.addTab(self._wrap_copy(self.txt_results_original, "Results-Original"),
@@ -529,12 +529,20 @@ class EmailAnalyzerPage(QWidget):
         for u in a.urls:
             risk_color = RED if u.risk_level.value in ("HIGH", "CRITICAL", "MALICIOUS") \
                 else YELLOW if u.risk_level.value == "SUSPICIOUS" else GREEN
+            if u.urlscan_malicious:
+                scan_txt, scan_color = "MALICIOUS", RED
+            elif u.urlscan_suspicious:
+                scan_txt, scan_color = "SUSPICIOUS", YELLOW
+            elif u.urlscan_score is not None:
+                scan_txt, scan_color = f"clean ({u.urlscan_score})", GREEN
+            else:
+                scan_txt, scan_color = "-", TEXT_DIM
             add_table_row(
                 self.tab_url_table,
                 [u.url[:110], u.domain, str(u.redirect_count),
                  (u.final_url[:70] + "...") if len(u.final_url) > 73 else u.final_url,
-                 str(u.risk_score), u.risk_level.value],
-                colors_by_col={5: risk_color},
+                 str(u.risk_score), u.risk_level.value, scan_txt],
+                colors_by_col={5: risk_color, 6: scan_color},
                 data=u)
 
         self.app_ctx.log_console_append(
@@ -565,10 +573,17 @@ class EmailAnalyzerPage(QWidget):
         sandbox_note = ("\n\nThe URL should not be opened in your normal browser. "
                         "Use an isolated sandbox or analysis environment."
                         if verdict_txt[0] == "DO NOT OPEN" else "")
+        if u.urlscan_score is not None:
+            scan_line = (f"\nURLScan.io : score {u.urlscan_score} -> "
+                         f"{u.urlscan_verdict.value}"
+                         + ("  [MALICIOUS]" if u.urlscan_malicious
+                            else "  [SUSPICIOUS]" if u.urlscan_suspicious else ""))
+        else:
+            scan_line = "\nURLScan.io : not scanned (only top-risk domains are submitted)"
         self.url_detail.setVisible(True)
         self.url_detail.setText(
             f"BROWSER SAFETY: {verdict_txt[0]}   [{safety.value}]{sandbox_note}\n"
-            f"Flags: {flags}\nRedirect chain:\n{chain}")
+            f"Flags: {flags}\nRedirect chain:\n{chain}{scan_line}")
 
     # ------------------------------------------------------------------ WHY dialog
     def _show_why(self):

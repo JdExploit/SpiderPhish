@@ -143,7 +143,18 @@ class EmailAnalyzer:
                 # [12] URLScan (only top risky URLs, user-visible) --------------
                 if any(self._should_urlscan(u) for u in a.urls):
                     log.info("Querying URLScan...")
-                    scan_targets = [u for u in a.urls if self._should_urlscan(u)][:3]
+                    scan_targets: list[UrlInfo] = []
+                    seen_scan_doms: set[str] = set()
+                    for u in a.urls:
+                        if not self._should_urlscan(u):
+                            continue
+                        dom_key = registered_domain(u.domain) if u.domain else u.url
+                        if dom_key in seen_scan_doms:
+                            continue
+                        seen_scan_doms.add(dom_key)
+                        scan_targets.append(u)
+                        if len(scan_targets) >= 3:
+                            break
                     for u in scan_targets:
                         res = await self._urlscan_lookup(u.url, client)
                         if res.get("status") == Status.NOT_CONFIGURED:
