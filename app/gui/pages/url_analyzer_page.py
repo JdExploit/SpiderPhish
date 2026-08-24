@@ -140,8 +140,19 @@ class UrlAnalyzerPage(_IntelBase):
     def on_result(self, res):  # noqa: ANN001
         self._set_busy(False)
         score, flags = res.get("score", 0), res.get("flags", [])
-        level = ("MALICIOUS" if score >= 80 else "HIGH" if score >= 60 else
-                 "SUSPICIOUS" if score >= 40 else "LOW" if score >= 15 else "SAFE")
+        scan = res.get("urlscan")
+        scan_ok = isinstance(scan, dict)
+        scan_malicious = bool(scan_ok and scan.get("malicious"))
+        scan_suspicious = bool(scan_ok and scan.get("suspicious"))
+        if scan_malicious:
+            level = "MALICIOUS"
+            score = max(score, 85)
+        elif scan_suspicious:
+            level = "SUSPICIOUS"
+            score = max(score, 40)
+        else:
+            level = ("MALICIOUS" if score >= 80 else "HIGH" if score >= 60 else
+                     "SUSPICIOUS" if score >= 40 else "LOW" if score >= 15 else "SAFE")
         red = res.get("redirect") or {}
         self.info_card.set_rows([
             ("Heuristic risk", f"{score}/100 ({level})"),

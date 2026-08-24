@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import ipaddress
+import math
+import re
 import unicodedata
+from collections import Counter
 from urllib.parse import urlparse, unquote
 
 from app.utils.ioc_extraction import (
@@ -63,6 +66,46 @@ CREDENTIAL_PATH_HINTS = [
 SUSPICIOUS_QUERY_PARAMS = ["redirect", "url=", "next=", "goto=", "continue=",
                            "dest=", "return=", "u=", "q=http"]
 
+_HEX_SEGMENT_RE = re.compile(r"^[0-9a-f]{6,}$", re.IGNORECASE)
+_FILE_EXT_RE = re.compile(r"\.(html?|php|aspx?|jsp)$", re.IGNORECASE)
+
+
+def _shannon(s: str) -> float:
+    if not s:
+        return 0.0
+    counts = Counter(s)
+    n = len(s)
+    return -sum((c / n) * math.log2(c / n) for c in counts.values())
+
+
+def _random_path_flag(path: str) -> str | None:
+    """Detect machine-generated path slugs (hex blobs, high-entropy tokens)."""
+    best = ""
+    for seg in re.split(r"/+", path or ""):
+        if not seg:
+            continue
+        core = _FILE_EXT_RE.sub("", seg)
+        if len(core) >= 6 and _HEX_SEGMENT_RE.match(core):
+            return f"Hex-like path segment '{core[:16]}'"
+        if len(core) > len(best):
+            best = core
+    letters = sum(ch.isalpha() for ch in best)
+    digits = sum(ch.isdigit() for ch in best)
+    if len(best) >= 12 and letters >= 6 and digits >= 1 \
+            and _shannon(best.lower()) >= 3.5:
+        return f"High-entropy random path segment '{best[:16]}'"
+    return None
+
+
+def _digit_domain_flag(host: str) -> str | None:
+    reg = registered_domain(host) or host
+    name = reg.split(".")[0]
+    digits = sum(ch.isdigit() for ch in name)
+    alpha = sum(ch.isalpha() for ch in name)
+    if digits >= 2 and alpha >= 8 and len(name) >= 10:
+        return f"Domain name with appended digits '{name}'"
+    return None
+
 
 def _strip_accents_lower(s: str) -> str:
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
@@ -96,6 +139,7 @@ def homograph_skeleton(host: str) -> str:
 
 def detect_brand_impersonation(host: str) -> tuple[str | None, str]:
     """Returns (brand, reason) if host impersonates a known brand."""
+    raw_labels = [p.lower() for p in host.split(".")]
     h = homograph_skeleton(host)
     labels = h.split(".")
     reg = registered_domain(h)
@@ -103,7 +147,15 @@ def detect_brand_impersonation(host: str) -> tuple[str | None, str]:
         if reg in bases or reg.endswith("." + tuple(bases)[0]):
             continue
         core = brand[:6]
-        for label in labels[:-1] or labels:
+        pairs = list(zip(labels[:-1], raw_labels[:-1])) or \
+            list(zip(labels, raw_labels))
+        for label, orig in pairs:
+            # skip numeric-only labels: confusable mapping turns '105' into
+            # 'los' which then looks like a brand typo (classic FP)
+            if not any(ch.isalpha() for ch in orig):
+                continue
+            if len(label) < 4:
+                continue
             if label == brand or label.startswith(brand):
                 pass
             d = levenshtein(label, brand, 3)
@@ -149,8 +201,10 @@ def url_flags(url: str) -> list[str]:
 
     if scheme == "http":
         flags.append("Plain HTTP (no TLS)")
+    ip_flag = False
     try:
         ipaddress.ip_address(host)
+        ip_flag = True
         flags.append("IP-based URL")
     except ValueError:
         pass
@@ -182,6 +236,14 @@ def url_flags(url: str) -> list[str]:
         flags.append("Heavily encoded URL")
     if p.port and p.port not in (80, 443, 8443):
         flags.append(f"Non-standard port {p.port}")
+    rand_flag = _random_path_flag(p.path)
+    if rand_flag:
+        flags.append(rand_flag)
+    digit_flag = _digit_domain_flag(host)
+    if digit_flag:
+        flags.append(digit_flag)
+    if ip_flag and (p.path or "").strip("/"):
+        flags.append("File/path served from raw IP address")
     return flags
 
 
@@ -189,7 +251,7 @@ def score_url(url: str, extra_flags: list[str] | None = None) -> tuple[int, list
     flags = url_flags(url)
     all_flags = flags + (extra_flags or [])
     weight = {
-        "IP-based URL": 15,
+        "IP-based URL": 25,
         "URL shortener": 5,
         "Plain HTTP (no TLS)": 8,
         "Punycode/IDN hostname (xn--)": 15,
@@ -208,8 +270,18 @@ def score_url(url: str, extra_flags: list[str] | None = None) -> tuple[int, list
             score += 20
         elif f.startswith("Suspicious path keywords"):
             score += 10
+        elif f.startswith("High-entropy random path"):
+            score += 30
+        elif f.startswith("Hex-like path segment"):
+            score += 20
+        elif f.startswith("File/path served from raw IP"):
+            score += 10
+        elif f.startswith("Domain name with appended digits"):
+            score += 10
         else:
             score += weight.get(f, 0)
+    if sum(1 for f in all_flags if f) >= 4:
+        score += 10  # aggregation: many weak signals together
     if "Redirect chain detected" in all_flags:
         score += 15
     return min(score, 100), all_flags

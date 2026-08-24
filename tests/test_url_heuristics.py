@@ -53,3 +53,37 @@ def test_open_redirect_param():
 def test_score_bounded():
     score, _ = score_url("http://xn--msft-3we.top/login/password?u=http://x")
     assert 0 <= score <= 100
+
+
+# --- regression tests from real-world misses (2026-08-24) -----------------
+
+def test_random_path_and_digit_domain_flagged():
+    score, flags = score_url("https://cloudsenterprise26.com/skjsadfi123uv12/")
+    assert score >= 40
+    assert any("High-entropy random path" in f for f in flags)
+    assert any("appended digits" in f for f in flags)
+
+
+def test_raw_ip_with_path_scored_high():
+    score, flags = score_url("http://5.182.210.174/ece1eb")
+    assert score >= 60
+    assert "Hex-like path segment 'ece1eb'" in flags
+    assert "File/path served from raw IP address" in flags
+
+
+def test_bare_ip_https_suspicious():
+    score, flags = score_url("https://139.59.240.15/kworker")
+    assert score >= 30
+    assert "File/path served from raw IP address" in flags
+
+
+def test_numeric_subdomain_not_brand_lookalike():
+    """'105' -> skeleton 'los' must not look like an 'ups' typo."""
+    brand, reason = detect_brand_impersonation(
+        "7f898d686d8c408e9baec6059bad89f4.105.eu.prod.marketingusercontent.com")
+    assert brand is None or "ups" not in (reason or "")
+
+
+def test_legit_sites_stay_clean():
+    assert score_url("https://www.google.com")[0] == 0
+    assert score_url("https://www.vitaldent.com/es/politica-de-cookies/")[0] == 0
