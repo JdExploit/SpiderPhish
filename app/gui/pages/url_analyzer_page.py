@@ -73,6 +73,9 @@ class UrlAnalyzerPage(_IntelBase):
 
         right = QWidget(); rl = QVBoxLayout(right); rl.setContentsMargins(0,0,0,0)
         chain_card = Card("REDIRECT CHAIN (real HTTP trace)")
+        from app.gui.widgets.redirect_flow import RedirectFlowView
+        self.flow_view = RedirectFlowView()
+        chain_card.add(self.flow_view)
         self.chain_view = make_table(
             ["#", "Status", "URL", "Server", "Location"], stretch_cols=[2])
         chain_card.add(self.chain_view); rl.addWidget(chain_card)
@@ -173,6 +176,7 @@ class UrlAnalyzerPage(_IntelBase):
         self.safety_note.setText(note)
 
         self.chain_view.setRowCount(0)
+        self.flow_view.set_hops(red.get("hops", []))
         for h in red.get("hops", []):
             add_table_row(self.chain_view, [
                 str(h.get("step")), str(h.get("status_code") or "META"),
