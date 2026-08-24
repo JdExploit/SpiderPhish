@@ -124,18 +124,27 @@ class DomainReputationPage(_IntelBase):
             rows = []
             async with httpx.AsyncClient(timeout=timeout) as client:
                 info = await analyze_domain(domain, client)
-            rows += [
-                ("A", ", ".join(info.a) or "-"), ("MX", "; ".join(info.mx[:3]) or "-"),
-                ("NS", "; ".join(info.ns[:3]) or "-"),
-                ("Registrar", info.registrar or "-"),
-                ("Created", info.creation_date or "-"),
-                ("Age", f"{info.age_days} days" if info.age_days is not None else "unknown"),
-                ("Flags", ", ".join(info.flags) or "-")]
-            vt = await reg.virustotal.lookup_domain(domain, client)
+                rows += [
+                    ("A", ", ".join(info.a) or "-"),
+                    ("MX", "; ".join(info.mx[:3]) or "-"),
+                    ("NS", "; ".join(info.ns[:3]) or "-"),
+                    ("Registrar", info.registrar or "-"),
+                    ("Created", info.creation_date or "-"),
+                    ("Age", f"{info.age_days} days"
+                     if info.age_days is not None else "unknown"),
+                    ("Flags", ", ".join(info.flags) or "-")]
+                if info.error:
+                    rows.append(("RDAP", info.error))
+                vt = await reg.virustotal.lookup_domain(domain, client)
+                otx = await reg.otx.lookup_domain(domain, client)
             st = getattr(vt.get("status"), "value", "?")
             rows.append(("VirusTotal",
                          f"malicious votes: {vt.get('malicious_votes')}" if st == "INFO"
                          else vt.get("error") or st))
+            st_o = getattr(otx.get("status"), "value", "?")
+            rows.append(("OTX",
+                         f"{otx.get('pulse_count', 0)} pulses" if st_o == "INFO"
+                         else otx.get("error") or st_o))
             return rows
 
         log.info("Domain reputation check: %s", domain)

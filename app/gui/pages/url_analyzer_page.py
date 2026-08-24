@@ -32,6 +32,7 @@ class _IntelBase(QWidget):
         self._worker.start()
 
     def on_failed(self, err: str):
+        log.error("Lookup failed: %s", err)
         QMessageBox.critical(self, "Error", err)
 
 
